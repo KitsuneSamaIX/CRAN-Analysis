@@ -147,8 +147,12 @@ edges = as_tibble(dt_edges)
 
 ## La rete CRAN
 
+```{r fig.align='center', fig.height=2.5, fig.width=2.5}
+knitr::include_graphics("R_logo.png")
+```
+
 - Il **Comprehensive R Archive Network (CRAN)** è la repository centrale per i *pacchetti* software del linguaggio di programmazione R.
-- Sul sito ufficiale viene descritto come "una rete di server ftp e web in tutto il mondo che conservano versioni identiche e aggiornate di codice e documentazione per R". 
+- Sul sito ufficiale viene descritto come "*una rete di server ftp e web in tutto il mondo che conservano versioni identiche e aggiornate di codice e documentazione per R*".
 - Se state installando un pacchetto R nel modo standard, esso è fornito da uno dei mirror del CRAN.
 
 ## Il dataset
@@ -914,6 +918,7 @@ legend(
 ```
 
 Dal precedente grafico si evincono due importanti caratteristiche della rete CRAN:
+
 - Il comportamento **scale free** degli **in-degree** indica un'*alta riusabilità dei componenti*.
 - L'elevato troncamento degli **out-degree** pone un *limite alla complessià delle dipendenze* dei singoli pacchetti.
 
