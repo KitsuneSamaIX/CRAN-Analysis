@@ -1,0 +1,309 @@
+{
+    "@context": {
+        "@language": "en",
+        "@vocab": "https://schema.org/",
+        "column": "ml:column",
+        "extract": "ml:extract",
+        "field": "ml:field",
+        "fileProperty": "ml:fileProperty",
+        "format": "ml:format",
+        "includes": "ml:includes",
+        "isEnumeration": "ml:isEnumeration",
+        "jsonPath": "ml:jsonPath",
+        "ml": "http://mlcommons.org/schema/",
+        "parentField": "ml:parentField",
+        "path": "ml:path",
+        "recordSet": "ml:recordSet",
+        "references": "ml:references",
+        "regex": "ml:regex",
+        "repeated": "ml:repeated",
+        "replace": "ml:replace",
+        "sc": "https://schema.org/",
+        "separator": "ml:separator",
+        "source": "ml:source",
+        "subField": "ml:subField",
+        "transform": "ml:transform",
+        "data": {
+            "@id": "ml:data",
+            "@type": "@json"
+        },
+        "dataType": {
+            "@id": "ml:dataType",
+            "@type": "@vocab"
+        }
+    },
+    "citation": "None",
+    "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "url": "https://www.kaggle.com/datasets/headsortails/r-package-history-on-cran",
+    "distribution": [
+        {
+            "contentUrl": "https://www.kaggle.com/api/v1/datasets/download/headsortails/r-package-history-on-cran",
+            "contentSize": "5.376 MB",
+            "md5": "YmpekKcqNlmGvMQylElZOw==",
+            "fileExtension": ".zip",
+            "encodingFormat": "application/zip",
+            "@type": "sc:FileObject",
+            "name": "archive.zip",
+            "description": "Archive containing all the contents of the R Package History on CRAN dataset"
+        },
+        {
+            "contentUrl": "cran_package_history.csv",
+            "containedIn": "archive.zip",
+            "encodingFormat": "text/csv",
+            "@type": "sc:FileObject",
+            "name": "cran_package_history.csv",
+            "description": "version history of virtually all packages in the previous table. This table has one row for each combination of package name and version number, which in most cases leads to multiple rows per package. Packages are listed in alphabetical order according to their names."
+        },
+        {
+            "contentUrl": "cran_package_overview.csv",
+            "containedIn": "archive.zip",
+            "encodingFormat": "text/csv",
+            "@type": "sc:FileObject",
+            "name": "cran_package_overview.csv",
+            "description": "All R packages currently available through CRAN, with (usually) 1 row per package. (At the time of the creation of this Kaggle dataset there were a few packages with 2 entries and different dependencies. Feel free to contribute some EDA investigating those.) Packages are listed in alphabetical order according to their names."
+        }
+    ],
+    "recordSet": [
+        {
+            "field": [
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_history.csv",
+                        "extract": {
+                            "column": "package"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "package",
+                    "description": "Package Name"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_history.csv",
+                        "extract": {
+                            "column": "version"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "version",
+                    "description": "Package Version"
+                },
+                {
+                    "dataType": [
+                        "sc:Date"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_history.csv",
+                        "extract": {
+                            "column": "date"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "date",
+                    "description": "Publication date of version"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_history.csv",
+                        "extract": {
+                            "column": "repository"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "repository",
+                    "description": "CRAN or Archive"
+                }
+            ],
+            "@type": "ml:RecordSet",
+            "name": "cran_package_history.csv_records",
+            "description": "version history of virtually all packages in the previous table. This table has one row for each combination of package name and version number, which in most cases leads to multiple rows per package. Packages are listed in alphabetical order according to their names."
+        },
+        {
+            "field": [
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "package"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "package",
+                    "description": "Package name"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "version"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "version",
+                    "description": "Current version"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "depends"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "depends",
+                    "description": "Package depends on"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "imports"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "imports",
+                    "description": "Package imports"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "license"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "license",
+                    "description": "License"
+                },
+                {
+                    "dataType": [
+                        "sc:Boolean"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "needs_compilation"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "needs_compilation",
+                    "description": "Does the package need compilation?"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "author"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "author",
+                    "description": "Package authors"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "bug_reports"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "bug_reports",
+                    "description": "Send bugs here"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "url"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "url",
+                    "description": "Where to read more"
+                },
+                {
+                    "dataType": [
+                        "sc:Date"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "date_published"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "date_published",
+                    "description": "Date this version was published"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "description"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "description",
+                    "description": "What does the package do?"
+                },
+                {
+                    "dataType": [
+                        "sc:Text"
+                    ],
+                    "source": {
+                        "distribution": "cran_package_overview.csv",
+                        "extract": {
+                            "column": "title"
+                        }
+                    },
+                    "@type": "ml:Field",
+                    "name": "title",
+                    "description": "Tagline"
+                }
+            ],
+            "@type": "ml:RecordSet",
+            "name": "cran_package_overview.csv_records",
+            "description": "All R packages currently available through CRAN, with (usually) 1 row per package. (At the time of the creation of this Kaggle dataset there were a few packages with 2 entries and different dependencies. Feel free to contribute some EDA investigating those.) Packages are listed in alphabetical order according to their names."
+        }
+    ],
+    "@type": "sc:Dataset",
+    "name": "R-Package-History-on-CRAN",
+    "description": "Current packages on the Comprehensive R Archive Network and their past versions"
+}

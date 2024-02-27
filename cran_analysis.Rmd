@@ -1,0 +1,924 @@
+---
+title: "CRAN Analysis"
+author: "Mattia Fedrigo"
+date: "`r Sys.Date()`"
+output: 
+  ioslides_presentation:
+    css: style.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r include=FALSE}
+# Load packages
+
+# Fast table computations
+library(data.table)
+
+# Tidyverse
+library(dplyr)
+library(readr)
+library(stringr)
+library(magrittr)
+library(lubridate)
+
+# Graphs
+library(igraph)
+library(tidygraph)
+library(ggraph)
+library(graphlayouts)
+library(ggforce)
+
+# Stats
+library(moments)
+
+# Style
+library(plotly)
+library(hrbrthemes)
+library(ggthemes)
+
+# ggplot2 extensions
+library(cowplot)
+library(treemapify)
+
+# Text analysis and visualization
+library(tm)
+library(wordcloud)
+
+# Display tables
+library(kableExtra)
+```
+
+```{r include=FALSE}
+# PREPARE DATA
+
+# Extract the edges of the (directed) graph
+
+# Read data from files
+dt_nodes = fread("cran_package_overview.csv")
+
+# Check NAs
+colSums(is.na(dt_nodes))
+
+# Check package duplicates
+sum(duplicated(dt_nodes$package))
+
+# Show package duplicates
+dt_nodes[duplicated(dt_nodes$package), package]
+
+# Check duplicates
+dt_nodes[package == "Matrix", c(1:4,10)]
+dt_nodes[package == "XML", c(1:4,10)]
+
+# Sort by date (to keep the entry with most recent date)
+dt_nodes = dt_nodes[order(package, date_published, decreasing = TRUE)]
+
+# 'package' MUST be unique: delete any duplicates
+dt_nodes = unique(dt_nodes, by = "package")
+
+# Map adjacency list to edges
+adj2edges = function(name, adj1, adj2) {
+  # Extract adjacency list
+  adj_list = c(adj1, adj2) %>% str_split(",") %>% unlist() %>% str_match("[[:alnum:]\\.]+")
+  adj_list = adj_list[adj_list != "R"]
+  adj_list = unique(adj_list)
+  
+  # From adjacency list to edges
+  result = data.table(
+    from = name,
+    to = adj_list
+  )
+  
+  return(result)
+}
+
+# Map on all nodes
+adj_lists = Map(adj2edges, dt_nodes$package, dt_nodes$depends, dt_nodes$imports)
+
+# Combine all data
+dt_edges = rbindlist(adj_lists)
+
+# Remove edges containing NAs
+dt_edges = na.omit(dt_edges)
+
+# Check unique count
+uniqueN(dt_edges$from)
+uniqueN(dt_edges$to)
+
+# There are a few packages in the "to" part of edges that are not included in the CRAN database
+# Some of these are the R base packages (i.e. stats, utils, etc) and others are
+#  third-party packages not available in CRAN, such as those stored in 'Bioconductor'.
+not_in_cran = setdiff(dt_edges$to, dt_nodes$package)
+not_in_cran = sort(not_in_cran)
+not_in_cran
+length(not_in_cran)
+
+# Number of edges referring to packages not_in_cran
+nrow(dt_edges[to %in% not_in_cran])
+
+# We choose to keep the packages not_in_cran because they are an important part of the network
+# We first mark packages that are in CRAN
+dt_nodes[, in_cran := TRUE]
+# And then we add dummy nodes for packages not_in_cran
+dt_not_in_cran = data.table(
+  package = not_in_cran,
+  in_cran = FALSE
+)
+dt_nodes = rbindlist(list(dt_nodes, dt_not_in_cran), fill = TRUE)
+
+# Sort by 'package' (this is only to keep the nodes in a nice alphabetical order)
+dt_nodes = dt_nodes[order(package)]
+```
+
+```{r include=FALSE}
+# Load data (as tibble)
+cran_history = read_csv("cran_package_history.csv")
+nodes = as_tibble(dt_nodes)
+edges = as_tibble(dt_edges)
+```
+
+# Introduzione
+
+## La rete CRAN
+
+- Il **Comprehensive R Archive Network (CRAN)** è la repository centrale per i *pacchetti* software del linguaggio di programmazione R.
+- Sul sito ufficiale viene descritto come "una rete di server ftp e web in tutto il mondo che conservano versioni identiche e aggiornate di codice e documentazione per R". 
+- Se state installando un pacchetto R nel modo standard, esso è fornito da uno dei mirror del CRAN.
+
+## Il dataset
+
+Il dataset su cui andremo a svolgere l'analisi si compone di due tabelle che descrivono lo stato attuale (aggiornato a luglio 2022) della rete CRAN:
+
+- **cran_package_overview.csv**: tutti i pacchetti presenti sul CRAN (una riga per *pacchetto*).
+```{r}
+nodes %>%
+  filter(package == "A3") %>%
+  kbl() %>%
+  kable_material() %>%
+  kable_styling(
+    font_size = 16,
+    full_width = FALSE,
+    bootstrap_options = "striped"
+  )
+```
+
+- **cran_package_history.csv**: lo storico delle versioni di tutti pacchetti presenti nella precedente tabella (una riga per ogni combinazione di *pacchetto* + *numero di versione*).
+```{r}
+cran_history %>%
+  filter(package == "A3") %>%
+  kbl() %>%
+  kable_material() %>%
+  kable_styling(
+    font_size = 16,
+    full_width = FALSE,
+    bootstrap_options = "striped"
+  )
+```
+
+# Analisi storica e generale della rete CRAN
+
+## Come è variato negli anni il numero di complessivo di pacchetti?
+
+Conteggio *cumulativo* dei pacchetti disponibili sul CRAN, per data di prima pubblicazione:
+```{r}
+# Plot CRAN package count history
+p =
+cran_history %>%
+  group_by(package) %>%
+  slice_min(order_by = date, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(month = floor_date(date, unit = "month")) %>%
+  count(month) %>%
+  arrange(month) %>%
+  mutate(cumul = cumsum(n)) %>%
+  ggplot(aes(month, cumul)) +
+  geom_line(color = "purple", linewidth = 1) +
+  theme_minimal() +
+  labs(
+    x = "Anno", 
+    y = "Conteggio cumulativo"
+  )
+
+# Interactive with plotly
+ggplotly(p)
+```
+
+## Quanti nuovi pacchetti vengono pubblicati annualmente?
+
+Numero di *nuovi* pacchetti pubblicati annualmente sul CRAN, per data di prima pubblicazione:
+```{r}
+cran_history %>%
+  group_by(package) %>%
+  slice_min(order_by = date, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(year = floor_date(date, unit = "year")) %>%
+  count(year) %>%
+  ggplot(aes(year, n)) +
+  geom_col(fill = "purple") +
+  scale_x_date() +
+  theme_minimal() +
+  labs(
+    x = "Anno", 
+    y = "Numero di nuovi pacchetti",
+    subtitle = "Nota: dati fino a luglio 2022"
+  )
+```
+
+## Come varia la frequenza annuale di rilasci di un singolo pacchetto?
+### Un esempio significativo: *dplyr*
+```{r}
+cran_history %>%
+  filter(package == "dplyr") %>%
+  mutate(year = floor_date(date, unit = "year")) %>%
+  count(year) %>%
+  ggplot(aes(year, n)) +
+  geom_col(fill = "purple") +
+  scale_x_date() +
+  theme_minimal() +
+  labs(
+    x = "Anno", 
+    y = "Numero di rilasci", 
+    title = "Frequenza annuale di rilasci di 'dplyr'",
+    subtitle = "Nota: dati fino a luglio 2022"
+  )
+```
+
+## In generale, come è variata negli anni la frequenza di rilasci dei pacchetti?
+
+Numero complessivo di nuovi pacchetti e aggiornamenti pubblicati annualmente sul CRAN:
+```{r}
+cran_history %>%
+  mutate(year = floor_date(date, unit = "year")) %>%
+  count(year) %>%
+  ggplot(aes(year, n)) +
+  geom_col(fill = "purple") +
+  scale_x_date() +
+  theme_minimal() +
+  labs(
+    x = "Anno", 
+    y = "Numero di rilasci",
+    subtitle = "Nota: dati fino a luglio 2022"
+  )
+```
+
+## Quali sono i tipi di licenza più usati dagli sviluppatori su CRAN?
+```{r}
+nodes %>%
+  count(license) %>%
+  filter(!is.na(license)) %>%
+  # Summarize licenses with few observations in the 'Other' category
+  mutate(license = replace(license, n <= 150, "Other")) %>%
+  group_by(license) %>%
+  summarize(n = sum(n)) %>%
+  ungroup() %>%
+  # ----------------------------------------------------------------
+  ggplot(aes(area = n, fill = n, label = license)) +
+  geom_treemap() +
+  geom_treemap_text(
+    color = "white",
+    place = "centre",
+    min.size = 4,
+    fontface = "bold"
+  ) +
+  scale_fill_viridis_c(
+    option = "viridis",
+    end = 0.85
+  )
+```
+
+## Quali sono le parole chiave nell'ecosistema CRAN?
+
+Wordcloud generata a partire dalle *tagline* dei pacchetti:
+```{r fig.height=6, fig.width=8}
+# Gather text vector
+text = dt_nodes$title
+
+# Create corpus  
+docs = Corpus(VectorSource(text))
+
+# Clean text
+docs %<>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace) %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(removeWords, stopwords("english"))
+
+# Create term-document matrix
+tdm = TermDocumentMatrix(docs) %>% as.matrix()
+words = sort(rowSums(tdm), decreasing = TRUE) 
+df_words = data.frame(word = names(words), freq = words)
+
+# Set seed for reproducibility
+set.seed(778)
+
+# Generate the wordcloud
+wordcloud(
+  words = df_words$word, 
+  freq = df_words$freq, 
+  min.freq = 1,
+  max.words = 200,
+  random.order = FALSE, 
+  rot.per = 0.35,            
+  colors = brewer.pal(8, "Dark2")
+)
+```
+
+# Dependency Network Analysis
+
+## Rappresentazione della rete
+
+- Rappresentiamo la rete **CRAN** in termini di un *grafo diretto* dove i pacchetti sono rappresentati dai nodi e le dipendenze sono rappresentate dagli archi.
+- **Nota**: prima dell'aggiunta dei *namespace* (versione 2.14.0 di R) il campo 'Depends' era l'unico modo di inserire una dipendenza da un altro pacchetto, dopo l'aggiunta dei *namespace* il campo 'Imports' è diventato il nuovo standard. Per la presente analisi i due campi hanno lo stesso significato in termini di *dipendenza* e pertanto scegliamo di combinarli.
+- La rete **CRAN** così costruita non risulta connessa.
+- Riduciamo dunque la rete alla sua più grande componente (debolmente) connessa. (**giant component**)
+- Infine, per considerare le dipendenze ricorsive calcoliamo anche la **chiusura transitiva** del precedente grafo.
+
+```{r include=FALSE}
+# Full dependency graph (directed, not connected)
+full_dep_graph = tbl_graph(nodes = nodes, edges = edges, directed = TRUE, node_key = "package")
+full_dep_graph
+
+# Largest weakly connected component (the giant component)
+giant_dep_graph = convert(full_dep_graph, to_largest_component, type = "weak", .clean = TRUE)
+giant_dep_graph
+
+# Transitive closure (of the giant component)
+longest_geodesic = diameter(giant_dep_graph)
+trans_dep_graph = connect(giant_dep_graph, order = longest_geodesic, mode = "out") %>% as_tbl_graph()
+trans_dep_graph
+```
+
+```{r}
+# Compute degree centrality for all graphs
+full_dep_graph %<>% 
+  activate(nodes) %>% 
+  mutate(
+    degree_centrality = centrality_degree(mode = "all")
+  )
+
+giant_dep_graph %<>% 
+  activate(nodes) %>% 
+  mutate(
+    degree_centrality = centrality_degree(mode = "all"),
+    out_degree_centrality = centrality_degree(mode ="out"),
+    in_degree_centrality = centrality_degree(mode ="in")
+  )
+
+trans_dep_graph %<>% 
+  activate(nodes) %>% 
+  mutate(
+    degree_centrality = centrality_degree(mode = "all"),
+    out_degree_centrality = centrality_degree(mode ="out"),
+    in_degree_centrality = centrality_degree(mode ="in")
+  )
+```
+
+Otteniamo dunque tre grafi con i seguenti valori:
+```{r}
+# Num of Nodes
+fg_nn = full_dep_graph %>% activate(nodes) %>% as_tibble() %>% nrow()
+gc_nn = giant_dep_graph %>% activate(nodes) %>% as_tibble() %>% nrow()
+tc_nn = trans_dep_graph %>% activate(nodes) %>% as_tibble() %>% nrow()
+
+# Num of Edges
+fg_en = full_dep_graph %>% activate(edges) %>% as_tibble() %>% nrow()
+gc_en = giant_dep_graph %>% activate(edges) %>% as_tibble() %>% nrow()
+tc_en = trans_dep_graph %>% activate(edges) %>% as_tibble() %>% nrow()
+
+# Avg Degree
+fg_ad = full_dep_graph %>% activate(nodes) %>% pull(degree_centrality) %>% mean()
+gc_ad = giant_dep_graph %>% activate(nodes) %>% pull(degree_centrality) %>% mean()
+tc_ad = trans_dep_graph %>% activate(nodes) %>% pull(degree_centrality) %>% mean()
+
+# Show table
+tab_data = data.frame(
+  "Graph" = c("Full CRAN", "Giant Component", "Chiusura Transitiva"),
+  "Nodes" = c(fg_nn, gc_nn, tc_nn),
+  "Edges" = c(fg_en, gc_en, tc_en),
+  "Avg_Degree" = c(fg_ad, gc_ad, tc_ad)
+)
+
+tab_data %>%
+  kbl() %>%
+  kable_material() %>%
+  kable_styling(
+    font_size = 16,
+    full_width = FALSE,
+    bootstrap_options = "striped"
+  )
+```
+**Nota**: *degree* = *in-degree* + *out-degree*
+
+- Dalla precedente tabella è inoltre chiaro che la rete CRAN è *sparsa*.
+
+# Local Analysis
+
+## Quali sono i pacchetti più **vulnerabili** della rete?
+
+- Definiamo la **vulnerabilità** di un nodo *X* come la percentuale di nodi della rete che verrebbero impattati da una problematica su *X*.
+- Nel 2016, la rimozione del pacchetto **left-pad** dalla repository di Javascript (*npm*) causò ripercussioni su migliaia di progetti (tra cui React), dimostrando le vulnerabilità nelle pratiche di gestione delle dipendenze software.
+- Bug, rimozioni o azioni malevole che coinvolgono un singolo pacchetto si propagano su tutti i livelli di dipendenza, *non solo su quelli diretti*!
+- Per individuare i pacchetti più a rischio possiamo usare le metriche di *centralità*.
+- La **degree centrality**, pur essendo la più semplice, risulta la più appropriata per individuare i pacchetti più popolari le cui problematiche possono impattare il maggior numero di pacchetti.
+- **Nota**: in questo caso è importante analizzare le dipendenze in senso *transitivo*: pacchetti con, apparentemente, poche dipendenze potrebbero averne in realtà centinaia transitive.
+
+Dipendenze a confronto:
+```{r}
+tab_data =
+trans_dep_graph %>%
+  activate(nodes) %>%
+  slice_max(order_by = out_degree_centrality, n = 5) %>%
+  as_tibble()
+
+tab_data =
+giant_dep_graph %>%
+  activate(nodes) %>%
+  inner_join(tab_data, by = "package") %>%
+  select(package, out_degree_centrality.x, out_degree_centrality.y) %>%
+  arrange(desc(out_degree_centrality.y)) %>%
+  as_tibble()
+
+tab_data %>%
+  kbl(
+    col.names = c("Package", "Dependencies (Out-Degree)", "Transitive Dependencies (Transitive Out-Degree)")
+  ) %>% 
+  kable_material() %>%
+  kable_styling(
+    font_size = 16,
+    full_width = FALSE,
+    bootstrap_options = "striped"
+  )
+```
+
+Pacchetti più **vulnerabili** all'interno della rete:
+```{r}
+tab_data =
+trans_dep_graph %>%
+  activate(nodes) %>%
+  mutate(
+    vulnerability = round((in_degree_centrality / (n() - 1)) * 100, digits = 1)
+  ) %>%
+  slice_max(order_by = in_degree_centrality, n = 10) %>%
+  as_tibble()
+
+tab_data =
+giant_dep_graph %>%
+  activate(nodes) %>%
+  inner_join(tab_data, by = "package") %>%
+  select(package, in_degree_centrality.x, in_degree_centrality.y, vulnerability) %>%
+  arrange(desc(in_degree_centrality.y)) %>%
+  as_tibble()
+
+tab_data %>%
+  kbl(
+    col.names = c("Packge", "In-Degree", "Transitive In-Degree", "Vulnerability (% Nodes)")
+  ) %>% 
+  kable_material() %>%
+  kable_styling(
+    font_size = 16,
+    full_width = FALSE,
+    bootstrap_options = "striped"
+  )
+```
+
+Pacchetti più **vulnerabili** all'interno della rete (escludendo i pacchetti '**core**'):
+```{r}
+tab_data =
+trans_dep_graph %>%
+  activate(nodes) %>%
+  filter(in_cran == TRUE) %>%
+  mutate(
+    vulnerability = round((in_degree_centrality / (n() - 1)) * 100, digits = 1)
+  ) %>%
+  slice_max(order_by = in_degree_centrality, n = 10) %>%
+  as_tibble()
+
+tab_data =
+giant_dep_graph %>%
+  activate(nodes) %>%
+  inner_join(tab_data, by = "package") %>%
+  select(package, in_degree_centrality.x, in_degree_centrality.y, vulnerability) %>%
+  arrange(desc(in_degree_centrality.y)) %>%
+  as_tibble()
+
+tab_data %>%
+  kbl(
+    col.names = c("Packge", "In-Degree", "Transitive In-Degree", "Vulnerability (% Nodes)")
+  ) %>% 
+  kable_material() %>%
+  kable_styling(
+    font_size = 16,
+    full_width = FALSE,
+    bootstrap_options = "striped"
+  )
+```
+
+# Group Analysis
+
+## Esistono delle **comunità** distinte all'interno delle rete?
+
+- Nell'ambito delle reti software ci si potrebbe aspettare che si formino degli ecosistemi (o **comunità**) di nodi che condividono simili applicazioni o ambiti d'uso.
+- Esistono diversi algoritmi per l'individuazione delle comunità, uno dei più popolari è il metodo di *Louvain*.
+- **Nota**: ovviamente in questo contesto non usiamo la chiusura transitiva.
+
+```{r include=FALSE}
+# Compute communities and layout
+
+# Here we need the undirected graph
+# Note: 
+#   - 'Louvain' only works on undirected graphs
+#   - the concept of direction is (typically) ignored by community detection algorithms (like 'Louvain')
+und_giant = giant_dep_graph %>% convert(to_undirected, .clean = TRUE)
+
+# Copy transitive degree into 'und_graph'
+# IMPORTANT: do this BEFORE sorting 'und_graph'
+tic = trans_dep_graph %>% activate(nodes) %>% select(in_degree_centrality) %>% as_tibble() %>% unlist()
+und_giant %<>% activate(nodes) %>% mutate(trans_in_degree_centrality = tic)
+
+# Sort by trans_in_degree_centrality (to display bigger nodes on top of the plot)
+# IMPORTANT: we MUST do the sorting here BEFORE other operations
+und_giant %<>% arrange(trans_in_degree_centrality)
+
+# Seed for reproducibility
+set.seed(1682)
+
+# Detect communities
+comms = cluster_louvain(und_giant, resolution = 1.12)
+length(comms)
+summary(factor(membership(comms)))
+
+# Add communities to graph
+und_giant %<>%
+  mutate(
+    community = membership(comms) %>% as.integer()
+  )
+
+# Now, we need to create a layout that will plot nodes in the same community close together.
+# We can do this by creating a graph with the same nodes, but with additional links between
+#  nodes in the same community.
+# The within-group links will be given a high weight and the original links will be given a small
+#  weight. This will cluster nodes in the same community.
+# We then apply the layout to plotting the original graph, without the extra links. They were just to get a good layout.
+und_giant_enhanced = und_giant
+E(und_giant_enhanced)$weight = 1
+for(i in unique(membership(comms))) {
+    comm_v = which(membership(comms) == i)
+    und_giant_enhanced = add_edges(
+      und_giant_enhanced,
+      combn(comm_v, 2),
+      attr = list(weight = 4)
+    )
+}
+
+# Seed for reproducibility
+set.seed(4363)
+
+# Compute layout
+coords = layout_with_fr(und_giant_enhanced)
+```
+
+```{r}
+# Prepare graph plot style
+
+# 'comms' as integer vector (for colors)
+grp = membership(comms) %>% as.integer()
+
+# 'grp' is mapped to colors, so we map edges to 'grp'
+# We choose to map the edge to the 'grp' of the node in the 'from' field
+get_grp = function(i) {
+  return(grp[i])
+}
+edge_grp =
+und_giant %>%
+  activate(edges) %>%
+  as_tibble() %>%
+  mutate(edge_grp = unlist(lapply(from, get_grp))) %>%
+  select(edge_grp) %>%
+  unlist()
+
+# Get (a list of) main nodes for each community (to display the label)
+main_pkgs =
+und_giant %>%
+  activate(nodes) %>%
+  group_by(community) %>%
+  slice_max(order_by = trans_in_degree_centrality, n = 3) %>%
+  ungroup() %>%
+  # filter(trans_in_degree_centrality > 2000) %>%
+  select(package) %>%
+  as_tibble() %>%
+  unlist()
+
+# Compute labels
+lbls = und_giant %>% activate(nodes) %>% select(package) %>% as_tibble() %>% unlist()
+lbls = ifelse(lbls %in% main_pkgs, lbls, NA)
+
+# Size of node points
+point_sizes = und_giant %>% activate(nodes) %>% select(trans_in_degree_centrality) %>% as_tibble() %>% unlist()
+```
+
+```{r fig.height=8, fig.width=8}
+# Plot the (previously computed) communities
+
+ggraph(und_giant, layout = "manual", x = coords[, 1], y = coords[, 2]) +
+  geom_edge_arc0(
+    aes(
+      color = edge_grp,
+    ),
+    edge_alpha = 0.08,
+    edge_width = 0.05
+  ) +
+  geom_node_point(
+    aes(
+      fill = grp,
+      size = point_sizes
+    ),
+    shape = 21,
+    stroke = 0.2
+  ) +
+  geom_node_text(
+    aes(
+      label = lbls,
+      size = point_sizes
+    ),
+    repel = TRUE
+  ) +
+  scale_size_continuous(
+    range = c(0.8, 6)
+  ) +
+  scale_edge_color_viridis(
+    option = "turbo",
+    begin = 0.05,
+    end = 0.95
+  ) +
+  scale_fill_viridis_c(
+    option = "turbo",
+    begin = 0.05,
+    end = 0.95
+  ) +
+  theme_graph() +
+  theme(
+    legend.position = "none",
+    plot.margin = margin(-100, -100, -100, -100)
+  )
+```
+
+## Quali sono le **comunità** più grandi?
+
+Comunità con almeno l'1% dei nodi (in ordine decrescente di grandezza):
+
+```{r}
+# Utilities for communities summary
+
+# Function for keyword extraction
+extract_keywords = function(text_v, max_keywords) {
+  # Create corpus  
+  docs = Corpus(VectorSource(text_v))
+  
+  # Clean text
+  docs %<>%
+    tm_map(removeNumbers) %>%
+    tm_map(removePunctuation) %>%
+    tm_map(stripWhitespace) %>%
+    tm_map(content_transformer(tolower)) %>%
+    tm_map(removeWords, stopwords("english"))
+  
+  # Create term-document matrix
+  tdm = TermDocumentMatrix(docs) %>% as.matrix()
+  words = sort(rowSums(tdm), decreasing = TRUE)
+  
+  # Return top keywords
+  return(names(words)[1:max_keywords])
+}
+
+# Remove elements from vector
+rm_elem_v = function(v, rm_v) {
+  return(v[!(v %in% rm_v)])
+}
+
+# Vulnerable packages to show for each community
+vul_pkgs =
+und_giant %>%
+  activate(nodes) %>%
+  group_by(community) %>%
+  slice_max(order_by = trans_in_degree_centrality, n = 4) %>%
+  ungroup() %>%
+  arrange(desc(trans_in_degree_centrality)) %>%
+  select(package) %>%
+  as_tibble() %>%
+  unlist()
+```
+
+
+```{r}
+# Total nodes
+nrow_und_giant = und_giant %>% activate(nodes) %>% as_tibble() %>% nrow()
+
+# Generate communities summary
+tab_data =
+und_giant %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  
+  group_by(community) %>%
+  
+  summarize(
+    percent = ((n() / nrow_und_giant) * 100) %>% round(digits = 1),
+    
+    most_vulnerable = intersect(vul_pkgs, package) %>% str_flatten(collapse = ", "),
+    
+    keywords = extract_keywords(title, 6) %>%
+      rm_elem_v(c("data", "using", "models")) %>%
+      str_flatten(collapse = ", ")
+  ) %>%
+  
+  ungroup() %>%
+  
+  filter(percent > 1) %>%
+  arrange(desc(percent)) %>%
+  
+  select(percent, most_vulnerable, keywords)
+
+# Show table
+tab_data %>%
+  kbl(
+    col.names = c("Size (% Nodes)", "Most Vulnerable", "Description Keywords")
+  ) %>% 
+  kable_material() %>%
+  kable_styling(
+    font_size = 16,
+    full_width = FALSE,
+    bootstrap_options = "striped"
+  )
+```
+
+# Global Analysis
+
+## La rete CRAN ha le caratteristiche di "**Small World**"?
+
+Sappiamo che, in generale, il fenomeno di *small world* richiede due caratteristiche:
+
+- **High clustering**: il coefficiente di clustering *C* della rete deve essere significativamente maggiore del coefficiente di clustering *C_r* di un grafo casuale equivalente (generato secondo il modello Erdős-Rényi).
+- **Low average shortest path**: la media delle distanze geodesiche tra i nodi della rete deve essere nell'ordine di *log(N)*, dove *N* è il numero di nodi della rete.
+
+Verifichiamo dunque se la rete CRAN presenta queste caratteristiche:
+```{r}
+gc_c = giant_dep_graph %>% transitivity()
+
+gc_cr = sample_gnm(vcount(giant_dep_graph), ecount(giant_dep_graph))  %>% transitivity()
+
+gc_mg = giant_dep_graph %>% mean_distance(directed = FALSE)
+
+gc_ln = log(vcount(giant_dep_graph))
+
+tab_data = data.frame(
+  "g" = c("CRAN (Giant Component)"),
+  "c" = c(gc_c),
+  "cr" = c(gc_cr),
+  "mg" = c(gc_mg),
+  "ln" = c(gc_ln)
+)
+
+tab_data %>%
+  kbl(
+    col.names = c("Graph", "C", "C_r", "Mean Geodesic", "log(N)")
+  ) %>% 
+  kable_material() %>%
+  kable_styling(
+    font_size = 16,
+    full_width = FALSE
+  )
+```
+
+Dalla tabella è possibile notare che la rete CRAN soddisfa le caratteristiche di *small world*.
+
+*Nota*: le misure in tabella si riferiscono alla controparte indiretta del grafo.
+
+## La rete CRAN segue una "**Power Law**"?
+
+Possiamo verificare se la rete CRAN segue una *power law* osservando la distribuzione dei gradi dei suoi nodi:
+```{r}
+giant_dep_graph %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  ggplot(aes(degree_centrality)) +
+    geom_histogram(
+      fill = "purple", 
+      binwidth = 50
+    ) +
+    scale_x_continuous(breaks = seq(0, 5000, by = 1000)) +
+    theme_minimal() +
+    labs(
+      x = "Degree", 
+      y = "Frequency"
+    )
+```
+
+Già osservando l'istogramma possiamo ipotizzare che la distribuzione segua una *power law*, ma verifichiamolo formalmente.
+
+Sappiamo infatti che se una distribuzione segue una *power law* allora anche la **CCDF** della distribuzione segue una *power law* (ma con esponente di un'unità inferiore).
+
+Dunque, se tracciata su una scala log-log, la **CCDF** di una *power law* apparirà come una linea retta:
+```{r}
+# Complementary Cumulative Distribution Function (CCDF)
+# (for each degree)
+ccdf = function(d) {
+  # Count nodes
+  n = length(d)
+  # Zero-init array of size 'max(d)'
+  max = max(d)
+  p = rep(0, max)
+  # For each possible degree i, compute the fraction of nodes that have degree >= i
+  for (i in 1:length(p)) {
+    p[i] = length(d[d >= i]) / n
+  }
+  # Return the array
+  return(p)
+}
+
+# Plot nodes with degree >= 'min_d'
+min_d = 3
+
+# Plot the log-log scale
+d = degree(giant_dep_graph, mode = "all")
+p = ccdf(d)
+plot(
+  min_d:max(d),
+  p[min_d:length(p)],
+  log = "xy",
+  type = "l",
+  col = "red",
+  lwd = 2.5,
+  xlab = "Degree", 
+  ylab = "CCDF"
+)
+```
+
+La precedente linea non risulta però perfettamente retta, infatti in questo caso *in-degree* e *out-degree* rappresentano due concetti diversi:
+
+- **in-degree** rappresenta il numero di pacchetti che richiedono un dato pacchetto per funzionare.
+- **out-degree** rappresenta il numero di pacchetti di cui un certo pacchetto ha bisogno per funzionare.
+
+Dunque, come ci si potrebbe aspettare, la rete CRAN segue una *power law* soltanto per quanto riguarda la distribuzione degli **in-degree**:
+```{r}
+# Plot the log-log scale
+d = degree(giant_dep_graph, mode = "all")
+p = ccdf(d)
+plot(
+  min_d:max(d),
+  p[min_d:length(p)],
+  log = "xy",
+  type = "l",
+  col = "red",
+  lwd = 2.5,
+  xlab = "Degree", 
+  ylab = "CCDF"
+)
+
+d = degree(giant_dep_graph, mode = "out")
+p = ccdf(d)
+lines(
+  min_d:max(d), 
+  p[min_d:length(p)], 
+  type = "l", 
+  col = "green",
+  lwd = 2.5,
+  lty = 3
+)
+
+d = degree(giant_dep_graph, mode = "in")
+p = ccdf(d)
+lines(
+  min_d:max(d),
+  p[min_d:length(p)],
+  type = "l",
+  col = "blue",
+  lwd = 2.5,
+  lty = 3
+)
+
+legend(
+  "topright",
+  legend = c("Degree", "Out-Degree", "In-Degree"),
+  inset = 0.01,
+  lwd = 2.5,
+  lty = c(1, 3, 3),
+  col = c("red", "green", "blue")
+)
+```
+
+Dal precedente grafico si evincono due importanti caratteristiche della rete CRAN:
+- Il comportamento **scale free** degli **in-degree** indica un'*alta riusabilità dei componenti*.
+- L'elevato troncamento degli **out-degree** pone un *limite alla complessià delle dipendenze* dei singoli pacchetti.
+
+Le caratteristiche elencate sono entrambe positive per una rete di dipendenze software, ma è altresì importante notare che, come visto prima, un'alta riusabilità aumenta anche la vulnerabilità dell'intero sistema in quanto il malfunzionamento di una piccolissima frazione di pacchetti può portare al malfunzionamento dell'intero sistema.
+
+Infine, è ormai chiaro che la rete CRAN risulta essere una **preferential attachment network**. Infatti i pacchetti con un numero maggiore di connessioni (dipendenze inverse) hanno una maggiore probabilità di aumentarle ulteriormente nel caso in cui nuovi pacchetti vengano aggiunti alla rete.
+
+# Grazie dell'attenzione!

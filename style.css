@@ -1,0 +1,9 @@
+slides>slide {
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    background-image: none;
+}
+
+slides>slide:not(.nobackground):after {
+    content: '';
+}
